@@ -1,8 +1,24 @@
 const buildDocFromHash = require('./buildDocFromHash');
 
-module.exports = function buildQuerySnapShot(requestedRecords, filters, selectFields) {
+module.exports = function buildQuerySnapShot(
+  requestedRecords,
+  filters,
+  selectFields,
+  limit,
+  orderBy,
+  orderDirection,
+  cursor,
+  inclusive,
+) {
   const definiteRecords = requestedRecords.filter(rec => !!rec);
-  const results = _filteredDocuments(definiteRecords, filters);
+  const orderedRecords = orderBy
+    ? _orderedDocuments(definiteRecords, orderBy, orderDirection)
+    : definiteRecords;
+  const cursoredRecords = cursor
+    ? _cursoredDocuments(orderedRecords, cursor, orderBy, inclusive)
+    : orderedRecords;
+  const filteredRecords = _filteredDocuments(cursoredRecords, filters);
+  const results = _limitDocuments(filteredRecords, limit);
   const docs = results.map(doc => buildDocFromHash(doc, 'abc123', selectFields));
 
   return {
@@ -107,6 +123,10 @@ function _recordsWithNonNullKey(records, key) {
 
 function _shouldCompareNumerically(a, b) {
   return typeof a === 'number' && typeof b === 'number';
+}
+
+function _shouldCompareStrings(a, b) {
+  return typeof a === 'string' && typeof b === 'string';
 }
 
 function _shouldCompareTimestamp(a, b) {
@@ -296,6 +316,109 @@ function _recordsWithOneOfValues(records, key, value) {
       value &&
       Array.isArray(value) &&
       getValueByPath(record, key).some(v => value.includes(v)),
+  );
+}
+
+/**
+ * Orders an array of mock document data by a specified field.
+ *
+ * @param {Array<DocumentHash>} records The array of records to order.
+ * @param {string} orderBy The field to order the records after.
+ * @param {'asc' | 'desc'} direction The direction to order the records. Deafault `'asc'`.
+ *
+ * @returns {Array<import('./buildDocFromHash').DocumentHash>} The ordered documents.
+ */
+function _orderedDocuments(records, orderBy, direction = 'asc') {
+  const ordered = [
+    ...records.filter(record => {
+      // When using the orderBy query, we must filter away the documents that do not have the order-by field defined.
+      const value = getValueByPath(record, orderBy);
+      return value !== null && typeof value !== 'undefined';
+    }),
+  ].sort((a, b) => {
+    const aVal = getValueByPath(a, orderBy);
+    const bVal = getValueByPath(b, orderBy);
+    if (!aVal || !bVal) {
+      return 0;
+    }
+    if (_shouldCompareNumerically(aVal, bVal)) {
+      return aVal - bVal;
+    }
+    if (_shouldCompareStrings(aVal, bVal)) {
+      return aVal.localeCompare(bVal);
+    }
+
+    const cmpTimestamps =
+      typeof aVal === 'object' &&
+      typeof bVal === 'object' &&
+      aVal !== null &&
+      bVal !== null &&
+      typeof aVal.toMillis === 'function' &&
+      typeof bVal.toMillis === 'function';
+    if (cmpTimestamps) {
+      return aVal.toMillis() - bVal.toMillis();
+    }
+    return 0;
+  });
+
+  return direction === 'asc' ? ordered : ordered.reverse();
+}
+
+/**
+ * Returns a subsection of records, starting from a cursor, set to a field value.
+ *
+ * @param {Array<DocumentHash>} records The array of records to get a subsection of. The array should be ordered by the same field specified in the `orderBy` parameter.
+ * @param {unknown} cursor The cursor. Either a field value or a document snapshot.
+ * @param {string} orderBy The field the records are ordered by.
+ * @param {boolean} inclusive Should the record at the cursor be included.
+ *
+ * @returns {Array<import('./buildDocFromHash').DocumentHash>} The subsection of documents, starting at the `cursor`.
+ */
+function _cursoredDocuments(records, cursor, orderBy, inclusive) {
+  if (_isSnapshot(cursor)) {
+    // Place the cursor at a document, based on a snapshot.
+    const cursorIndex = records.findIndex(record => record.id === cursor.id);
+    if (cursorIndex < 0) {
+      return [];
+    }
+    return records.slice(cursorIndex + (inclusive ? 0 : 1));
+  } else {
+    // Place the cursor at a field, based on a value.
+    const cmpAt = (a, b) => a >= b;
+    const cmpAfter = (a, b) => a > b;
+
+    const cmp = inclusive ? cmpAt : cmpAfter;
+    return records.filter(record => {
+      const v = getValueByPath(record, orderBy);
+      if (_shouldCompareNumerically(v, cursor)) {
+        return cmp(v, cursor);
+      }
+      if (_shouldCompareTimestamp(v, cursor)) {
+        return cmp(v.toMillis(), cursor.getTime());
+      }
+      if (typeof v.toMillis === 'function' && typeof cursor.toMillis === 'function') {
+        return cmp(v.toMillis(), cursor.toMillis());
+      }
+      if (_shouldCompareStrings(v, cursor)) {
+        return v.localeCompare(cursor);
+      }
+      // TODO: Compare other values as well.
+      return true;
+    });
+  }
+}
+
+function _limitDocuments(records, limit) {
+  return records.slice(0, limit);
+}
+
+function _isSnapshot(data) {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    typeof data.ref === 'object' &&
+    typeof data.ref.firestore === 'object' &&
+    typeof data.id === 'string'
   );
 }
 

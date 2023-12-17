@@ -558,4 +558,160 @@ describe('Queries', () => {
       },
     );
   });
+
+  test('it limits response to 1 document', async () => {
+    const animals = db.collection('animals');
+    const q = animals.limit(1);
+    const animalsSnaps = await q.get();
+    expect(animalsSnaps.size).toBe(1);
+  });
+
+  test('it limits response to 3 document', async () => {
+    const animals = db.collection('animals');
+    const q = animals.limit(3);
+    const animalsSnaps = await q.get();
+    expect(animalsSnaps.size).toBe(3);
+  });
+
+  test('it should throw when limit is not a number', async () => {
+    const animals = db.collection('animals');
+    expect(() => animals.limit('3')).toThrow(TypeError);
+  });
+
+  test('it orders animals by name', async () => {
+    const animals = db.collection('animals');
+    const q = animals.orderBy('name');
+    const animalSnaps = await q.get();
+    const animalIds = animalSnaps.docs.map(doc => doc.id);
+    expect(animalIds).toMatchObject([
+      'ant',
+      'chicken',
+      'cow',
+      'elephant',
+      'monkey',
+      'pogo-stick',
+      'worm',
+    ]);
+  });
+
+  test('it orders animals by name descending', async () => {
+    const animals = db.collection('animals');
+    const q = animals.orderBy('name', 'desc');
+    const animalSnaps = await q.get();
+    const animalIds = animalSnaps.docs.map(doc => doc.id);
+    expect(animalIds).toMatchObject([
+      'worm',
+      'pogo-stick',
+      'monkey',
+      'elephant',
+      'cow',
+      'chicken',
+      'ant',
+    ]);
+  });
+
+  test('it orders by nested fields', async () => {
+    const animals = db.collection('animals');
+    const q = animals.orderBy('appearance.color');
+    const animalSnaps = await q.get();
+    const animalIds = animalSnaps.docs.map(doc => doc.id);
+    expect(animalIds).toMatchObject(['cow']);
+  });
+
+  test('it should throw when using invalid direction', async () => {
+    const animals = db.collection('animals');
+    expect(() => animals.orderBy('name', 'invalidDirection')).toThrow();
+  });
+
+  test('it orders animals by legCount', async () => {
+    const animals = db.collection('animals');
+    const q = animals.orderBy('legCount');
+    const animalSnaps = await q.get();
+    const animalIds = animalSnaps.docs.map(doc => doc.id);
+    expect(animalIds).toMatchObject(['monkey', 'chicken', 'elephant', 'ant']);
+  });
+
+  test('it returns ordered animals, with more than 2 legs', async () => {
+    const animals = db.collection('animals');
+    const q = animals.orderBy('legCount').startAfter(2);
+    const animalSnaps = await q.get();
+    const animalIds = animalSnaps.docs.map(doc => doc.id);
+    expect(animalIds).toMatchObject(['elephant', 'ant']);
+  });
+
+  test('it returns animals ordered by legCount, after elephant', async () => {
+    const elephant = db.doc('animals/elephant');
+    const elephantSnap = await elephant.get();
+
+    const animals = db.collection('animals');
+    const q = animals.orderBy('legCount').startAfter(elephantSnap);
+    const animalSnaps = await q.get();
+    const animalIds = animalSnaps.docs.map(doc => doc.id);
+    expect(animalIds).toMatchObject(['ant']);
+  });
+
+  test('it returns ordered animals, with 4 or more legs', async () => {
+    const animals = db.collection('animals');
+    const q = animals.orderBy('legCount').startAt(4);
+    const animalSnaps = await q.get();
+    const animalIds = animalSnaps.docs.map(doc => doc.id);
+    expect(animalIds).toMatchObject(['elephant', 'ant']);
+  });
+
+  test('it returns animals ordered by legCount, starting at elephant', async () => {
+    const elephant = db.doc('animals/elephant');
+    const elephantSnap = await elephant.get();
+
+    const animals = db.collection('animals');
+    const q = animals.orderBy('legCount').startAt(elephantSnap);
+    const animalSnaps = await q.get();
+    const animalIds = animalSnaps.docs.map(doc => doc.id);
+    expect(animalIds).toMatchObject(['elephant', 'ant']);
+  });
+
+  test('it returns animals ordered by legCount, starting at chicken', async () => {
+    const chicken = db.doc('animals/chicken');
+    const chickenSnap = await chicken.get();
+
+    const animals = db.collection('animals');
+    const q = animals.orderBy('legCount').startAt(chickenSnap);
+    const animalSnaps = await q.get();
+    const animalIds = animalSnaps.docs.map(doc => doc.id);
+    expect(animalIds).toMatchObject(['chicken', 'elephant', 'ant']);
+  });
+
+  test('it returns animals ordered by name, starting after cow', async () => {
+    const cow = db.doc('animals/cow');
+    const cowSnap = await cow.get();
+
+    const animals = db.collection('animals');
+    const q = animals.orderBy('name').startAfter(cowSnap);
+    const animalSnaps = await q.get();
+    const animalIds = animalSnaps.docs.map(doc => doc.id);
+    expect(animalIds).toMatchObject(['elephant', 'monkey', 'pogo-stick', 'worm']);
+  });
+
+  test('it returns no documents when snapshot given to startAt does not exist', async () => {
+    const invalid = db.doc('animals/invalid');
+    const invalidSnap = await invalid.get();
+    expect(invalidSnap.exists).toBe(false);
+
+    const animals = db.collection('animals');
+    const q = animals.orderBy('name').startAt(invalidSnap);
+    const animalSnaps = await q.get();
+    const animalIds = animalSnaps.docs.map(doc => doc.id);
+    expect(animalIds).toMatchObject([]);
+  });
+
+  test('it returns no documents when snapshot given is the last document', async () => {
+    const worm = db.doc('animals/worm');
+    const wormSnap = await worm.get();
+    expect(wormSnap.exists).toBe(true);
+
+    const animals = db.collection('animals');
+    const q = animals.orderBy('name').startAfter(wormSnap);
+    const animalSnaps = await q.get();
+    const animalIds = animalSnaps.docs.map(doc => doc.id);
+    expect(animalIds).toMatchObject([]);
+  });
 });
